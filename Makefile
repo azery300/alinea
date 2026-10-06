@@ -1,7 +1,7 @@
 # Uses docker compose if available, otherwise podman compose.
 COMPOSE ?= $(shell command -v docker >/dev/null 2>&1 && echo "docker compose" || echo "podman compose")
 
-.PHONY: install lint format test db-up db-down
+.PHONY: install lint format test db-up db-down ingest
 
 install:
 	uv python install
@@ -24,3 +24,7 @@ db-up:
 
 db-down:
 	$(COMPOSE) down
+
+# Download the pinned legi-data version and (re)load the articles table.
+ingest:
+	uv run python -m alinea.ingest
