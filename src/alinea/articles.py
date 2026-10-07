@@ -7,8 +7,9 @@ import psycopg
 from alinea.parsing import Article
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS articles (
+CREATE TABLE articles (
     num         text PRIMARY KEY,       -- e.g. L1221-19
+    position    integer NOT NULL UNIQUE, -- order in the code
     id          text NOT NULL UNIQUE,   -- LEGIARTI id of the version in force
     cid         text NOT NULL,          -- id shared by all versions
     part        char(1) NOT NULL CHECK (part IN ('L', 'R', 'D')),
@@ -22,10 +23,13 @@ CREATE TABLE IF NOT EXISTS articles (
 )
 """
 
-COLUMNS = "num, id, cid, part, text, breadcrumb, status, valid_from, valid_to, nota, url"
+COLUMNS = "num, position, id, cid, part, text, breadcrumb, status, valid_from, valid_to, nota, url"
 
 
 def create_table(conn: psycopg.Connection) -> None:
+    """(Re)create the table. The ingest reloads everything anyway, so the schema always
+    matches the code and no migration is needed."""
+    conn.execute("DROP TABLE IF EXISTS articles")
     conn.execute(SCHEMA)
     conn.commit()
 
@@ -35,12 +39,17 @@ def replace_articles(conn: psycopg.Connection, articles: Iterable[Article]) -> N
     with conn.cursor() as cur:
         cur.execute("TRUNCATE articles")
         with cur.copy(f"COPY articles ({COLUMNS}) FROM STDIN") as copy:
-            for a in articles:
+            for position, a in enumerate(articles):
                 copy.write_row(
-                    (a.num, a.id, a.cid, a.part, a.text, list(a.breadcrumb), a.status,
+                    (a.num, position, a.id, a.cid, a.part, a.text, list(a.breadcrumb), a.status,
                      a.valid_from, a.valid_to, a.nota, a.url)
                 )  # fmt: skip
     conn.commit()
+
+
+def load_texts(conn: psycopg.Connection) -> list[tuple[str, str]]:
+    """(num, text) of every article, in code order."""
+    return conn.execute("SELECT num, text FROM articles ORDER BY position").fetchall()
 
 
 def length_stats(conn: psycopg.Connection) -> list[tuple]:

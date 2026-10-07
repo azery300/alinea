@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from alinea.articles import create_table, length_stats, replace_articles
+from alinea.articles import create_table, length_stats, load_texts, replace_articles
 from alinea.parsing import Article
 
 pytestmark = pytest.mark.db
@@ -57,3 +57,8 @@ def test_length_stats_per_part_and_overall(table):
     assert stats["L"][:2] == (1, 3)  # count, min length
     assert stats["all"][0] == 2
     assert stats["all"][-2] == 7  # max length
+
+
+def test_load_texts_keeps_code_order(table):
+    replace_articles(table, [make_article("R2", "Deux"), make_article("L1", "Un")])
+    assert load_texts(table) == [("R2", "Deux"), ("L1", "Un")]

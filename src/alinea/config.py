@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     # Raw sources and caches, gitignored.
     data_dir: Path = Path("data")
 
+    # Embeddings (Mistral API). mistral-embed has a fixed output size of 1024.
+    mistral_api_key: str = ""
+    embedding_model: str = "mistral-embed"
+    embedding_dim: int = 1024
+
 
 def get_settings() -> Settings:
     return Settings()

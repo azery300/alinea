@@ -79,3 +79,47 @@ What it means for chunking: half of the articles are under about 400 characters,
 (2.9%) are over 2,000 characters; the longest (R2312-9, 31,801 characters) is a list of
 information items, and the V2 split by paragraph is meant for those. The breadcrumb is up to 9
 levels deep.
+
+## Step 2: retrieval V1
+
+- **Embedding model: Mistral `mistral-embed` (1024 dimensions, fixed), free tier.** Gemini was
+  tried first (`gemini-embedding-2`, 768 dimensions) and dropped: its free tier allows 1,000
+  requests per day and every text in a batch counts as one request, so indexing stopped at 900
+  of the chunks and a full V1 index would have taken about 4 days. On the Mistral free tier the
+  response headers report 60 requests per minute, and one request accepted 64 chunks (38,650
+  tokens). The full V1 index took 151 seconds. V1 and V2 must use the same embedding model to
+  be comparable, so this choice holds until step 7. The Gemini code was removed; the `Embedder`
+  protocol in `llm.py` keeps the provider swappable.
+- **No query or document prefix.** `mistral-embed` embeds queries and documents the same way.
+- **Chunk size in characters, derived from the embedding model's tokenizer.** The spec asks for
+  about 500 tokens with 50 tokens of overlap. On the same 300-article sample (fixed seed), the
+  Mistral tokenizer gives **3.25 characters per token** (54,607 tokens for 177,398
+  characters), against 4.17 for Gemini. French legal text costs about 28% more tokens with
+  Mistral. So V1 chunks are 1,625 characters with 162 characters of overlap.
+- **V1 chunking: fixed-size windows over the whole code, blind to article boundaries.** This is
+  the naive baseline on purpose. Articles are joined in code order (new `position` column in
+  `articles`), each one under an "Article <num>" header, then cut at the last whitespace before
+  the size limit. Each chunk keeps the numbers of the articles it overlaps, which is what
+  recall@k will be measured on.
+- **Embedding cache: one SQLite file in `data/cache`**, keyed by model, dimension, task and
+  text, committed every 100 texts. Changing the model gives a cache miss instead of a wrong
+  vector, and an interrupted run keeps its work.
+- **One `chunks` table for every retrieval version** (`version` column), so V1 and V2 are
+  measured on the same database.
+- **Exact k-NN, no vector index.** The search scans every row, so it returns the true nearest
+  chunks. 31 ms in Postgres for 4,712 chunks (one query, measured with `EXPLAIN ANALYZE`). An
+  HNSW index can be added if the corpus grows.
+
+**Result: 4,712 chunks** (median 1,621 characters, max 1,624), 3.7 articles per chunk on
+average. Checked by hand with `make search` on three queries:
+
+- "combien de jours de congés payés par mois de travail": the first chunk holds L3141-3 (the
+  2.5 days per month rule).
+- "indemnité de licenciement ancienneté": L1234-9 first, R1234-2 in the top 3.
+- "durée maximale de la période d'essai d'un cadre": the top chunks are about the probation
+  period (L1221-20 to L1221-26), but L1221-19, which states the durations, is not in the top 10.
+  Its chunk mixes four articles (L1221-18 to L1221-21), the kind of miss the V2 structural
+  chunking is meant to fix. recall@k on the eval set (step 3) will say how common it is.
+
+The scores are bunched together (0.73 to 0.82 on these queries), so a fixed similarity
+threshold would be hard to set.
